@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Messaging;
 using PuppeteerSharp.Helpers;
+using static PuppeteerSharp.Messaging.RuntimeQueryObjectsResponse;
+using System.Numerics;
 
 namespace PuppeteerSharp
 {
@@ -23,14 +25,16 @@ namespace PuppeteerSharp
         private readonly CDPSession _client;
         private readonly int _contextId;
 
+        internal DOMWorld World { get; }
+
         internal ExecutionContext(
             CDPSession client,
             ContextPayload contextPayload,
-            Frame frame)
+            DOMWorld world)
         {
             _client = client;
             _contextId = contextPayload.Id;
-            Frame = frame;
+            World = world;
         }
 
         /// <summary>
@@ -39,7 +43,7 @@ namespace PuppeteerSharp
         /// <remarks>
         /// NOTE Not every execution context is associated with a frame. For example, workers and extensions have execution contexts that are not associated with frames.
         /// </remarks>
-        public Frame Frame { get; }
+        public Frame Frame => World?.Frame;
 
         /// <summary>
         /// Executes a script in browser context
@@ -111,17 +115,17 @@ namespace PuppeteerSharp
                 throw new PuppeteerException("Prototype JSHandle is disposed!");
             }
 
-            if (!((JObject)prototypeHandle.RemoteObject).TryGetValue(MessageKeys.ObjectId, out var objectId))
+            if (prototypeHandle.RemoteObject.ObjectId == null)
             {
                 throw new PuppeteerException("Prototype JSHandle must not be referencing primitive value");
             }
 
-            var response = await _client.SendAsync("Runtime.queryObjects", new Dictionary<string, object>
+            var response = await _client.SendAsync<RuntimeQueryObjectsResponse>("Runtime.queryObjects", new RuntimeQueryObjectsRequest
             {
-                {"prototypeObjectId", objectId.ToString()}
+                PrototypeObjectId = prototypeHandle.RemoteObject.ObjectId
             }).ConfigureAwait(false);
 
-            return CreateJSHandle(response[MessageKeys.Objects]);
+            return CreateJSHandle(response.Objects);
         }
 
         internal async Task<JSHandle> EvaluateExpressionHandleAsync(string script)
@@ -157,14 +161,14 @@ namespace PuppeteerSharp
 
             try
             {
-                return await EvaluateHandleAsync("Runtime.callFunctionOn", new Dictionary<string, object>
+                return await EvaluateHandleAsync("Runtime.callFunctionOn", new RuntimeCallFunctionOnRequest
                 {
-                    ["functionDeclaration"] = $"{script}\n{EvaluationScriptSuffix}\n",
-                    [MessageKeys.ExecutionContextId] = _contextId,
-                    ["arguments"] = args.Select(FormatArgument),
-                    ["returnByValue"] = false,
-                    ["awaitPromise"] = true,
-                    ["userGesture"] = true
+                    FunctionDeclaration = $"{script}\n{EvaluationScriptSuffix}\n",
+                    ExecutionContextId = _contextId,
+                    Arguments = args.Select(FormatArgument),
+                    ReturnByValue = false,
+                    AwaitPromise = true,
+                    UserGesture = true
                 }).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -173,8 +177,8 @@ namespace PuppeteerSharp
             }
         }
 
-        internal JSHandle CreateJSHandle(dynamic remoteObject)
-            => (remoteObject.subtype == "node" && Frame != null)
+        internal JSHandle CreateJSHandle(RemoteObject remoteObject)
+            => remoteObject.Subtype == RemoteObjectSubtype.Node && Frame != null
                 ? new ElementHandle(this, _client, remoteObject, Frame.FrameManager.Page, Frame.FrameManager)
                 : new JSHandle(this, _client, remoteObject);
 
@@ -201,23 +205,29 @@ namespace PuppeteerSharp
             return result is JToken token && token.Type == JTokenType.Null ? default : result;
         }
 
-        private async Task<JSHandle> EvaluateHandleAsync(string method, dynamic args)
+        private async Task<JSHandle> EvaluateHandleAsync(string method, object args)
         {
-            var response = await _client.SendAsync(method, args).ConfigureAwait(false);
+            var response = await _client.SendAsync<EvaluateHandleResponse>(method, args).ConfigureAwait(false);
 
-            if (response[MessageKeys.ExceptionDetails] is JToken exceptionDetails)
+            if (response.ExceptionDetails != null)
             {
                 throw new EvaluationFailedException("Evaluation failed: " +
-                    GetExceptionMessage(exceptionDetails.ToObject<EvaluateExceptionResponseDetails>(true)));
+                    GetExceptionMessage(response.ExceptionDetails));
             }
 
-            return CreateJSHandle(response.result);
+            return CreateJSHandle(response.Result);
         }
 
         private object FormatArgument(object arg)
         {
             switch (arg)
             {
+                case BigInteger big:
+                    return new { unserializableValue = $"{big}n" };
+
+                case int integer when integer == -0:
+                    return new { unserializableValue = "-0" };
+
                 case double d:
                     if (double.IsPositiveInfinity(d))
                     {
@@ -239,7 +249,10 @@ namespace PuppeteerSharp
                 case JSHandle objectHandle:
                     return objectHandle.FormatArgument(this);
             }
-            return new { value = arg };
+            return new RuntimeCallFunctionOnRequestArgument
+            {
+                Value = arg
+            };
         }
 
         private static string GetExceptionMessage(EvaluateExceptionResponseDetails exceptionDetails)
@@ -259,6 +272,31 @@ namespace PuppeteerSharp
                 }
             }
             return message;
+        }
+
+        internal async Task<ElementHandle> AdoptElementHandleASync(ElementHandle elementHandle)
+        {
+            if (elementHandle.ExecutionContext == this)
+            {
+                throw new PuppeteerException("Cannot adopt handle that already belongs to this execution context");
+            }
+            if (World == null)
+            {
+                throw new PuppeteerException("Cannot adopt handle without DOMWorld");
+            }
+
+            var nodeInfo = await _client.SendAsync<DomDescribeNodeResponse>("DOM.describeNode", new DomDescribeNodeRequest
+            {
+                ObjectId = elementHandle.RemoteObject.ObjectId,
+            }).ConfigureAwait(false);
+
+            var obj = await _client.SendAsync<DomResolveNodeResponse>("DOM.resolveNode", new DomResolveNodeRequest
+            {
+                BackendNodeId = nodeInfo.Node.BackendNodeId,
+                ExecutionContextId = _contextId
+            }).ConfigureAwait(false);
+
+            return CreateJSHandle(obj.Object) as ElementHandle;
         }
     }
 }

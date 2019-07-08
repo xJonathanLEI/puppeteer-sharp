@@ -1,13 +1,13 @@
 ﻿using System;
-using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using System.Net;
-using System.IO.Compression;
 using PuppeteerSharp.Helpers.Linux;
 
 namespace PuppeteerSharp
@@ -34,33 +34,29 @@ namespace PuppeteerSharp
             {Platform.Win64, "{0}/chromium-browser-snapshots/Win_x64/{1}/{2}.zip"}
         };
 
-        internal static readonly FilePermissions BrowserPermissionsInLinux =
-            FilePermissions.S_IRWXU |
-            FilePermissions.S_IRGRP |
-            FilePermissions.S_IXGRP |
-            FilePermissions.S_IROTH |
-            FilePermissions.S_IXOTH;
-
         /// <summary>
-        /// Default chromiumg revision.
+        /// Default Chromium revision.
         /// </summary>
-        public const int DefaultRevision = 609904;
+        public const int DefaultRevision = 669486;
 
         /// <summary>
         /// Gets the downloads folder.
         /// </summary>
         /// <value>The downloads folder.</value>
         public string DownloadsFolder { get; }
+
         /// <summary>
         /// A download host to be used. Defaults to https://storage.googleapis.com.
         /// </summary>
         /// <value>The download host.</value>
         public string DownloadHost { get; }
+
         /// <summary>
         /// Gets the platform.
         /// </summary>
         /// <value>The platform.</value>
         public Platform Platform { get; }
+
         /// <summary>
         /// Occurs when download progress in <see cref="DownloadAsync(int)"/> changes.
         /// </summary>
@@ -213,9 +209,9 @@ namespace PuppeteerSharp
 
             var revisionInfo = RevisionInfo(revision);
 
-            if (revisionInfo != null && (GetCurrentPlatform() == Platform.Linux || GetCurrentPlatform() == Platform.MacOS))
+            if (revisionInfo != null && GetCurrentPlatform() == Platform.Linux)
             {
-                LinuxSysCall.SetPermissions(revisionInfo.ExecutablePath, BrowserPermissionsInLinux);
+                LinuxSysCall.Chmod(revisionInfo.ExecutablePath, LinuxSysCall.ExecutableFilePermissions);
             }
             return revisionInfo;
         }
@@ -279,8 +275,9 @@ namespace PuppeteerSharp
         private void NativeExtractToDirectory(string zipPath, string folderPath)
         {
             var process = new Process();
+
             process.StartInfo.FileName = "unzip";
-            process.StartInfo.Arguments = $"{zipPath} -d {folderPath}";
+            process.StartInfo.Arguments = $"\"{zipPath}\" -d \"{folderPath}\"";
             process.Start();
             process.WaitForExit();
         }

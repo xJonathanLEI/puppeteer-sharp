@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Json;
 using PuppeteerSharp.Input;
 using PuppeteerSharp.Messaging;
 using System;
@@ -24,7 +24,7 @@ namespace PuppeteerSharp
         internal ElementHandle(
             ExecutionContext context,
             CDPSession client,
-            JToken remoteObject,
+            RemoteObject remoteObject,
             Page page,
             FrameManager frameManager) :
             base(context, client, remoteObject)
@@ -148,6 +148,14 @@ namespace PuppeteerSharp
             {
                 throw new PuppeteerException("Node is either not visible or not an HTMLElement");
             }
+            if (boundingBox.Width == 0)
+            {
+                throw new PuppeteerException("Node has 0 width.");
+            }
+            if (boundingBox.Height == 0)
+            {
+                throw new PuppeteerException("Node has 0 height.");
+            }
             var getLayoutMetricsResponse = await Client.SendAsync<GetLayoutMetricsResponse>("Page.getLayoutMetrics").ConfigureAwait(false);
 
             var clip = boundingBox;
@@ -198,8 +206,12 @@ namespace PuppeteerSharp
         public Task UploadFileAsync(params string[] filePaths)
         {
             var files = filePaths.Select(Path.GetFullPath).ToArray();
-            var objectId = RemoteObject[MessageKeys.ObjectId].AsString();
-            return Client.SendAsync("DOM.setFileInputFiles", new { objectId, files });
+            var objectId = RemoteObject.ObjectId;
+            return Client.SendAsync("DOM.setFileInputFiles", new DomSetFileInputFilesRequest
+            {
+                ObjectId = objectId,
+                Files = files
+            });
         }
 
         /// <summary>
@@ -384,9 +396,9 @@ namespace PuppeteerSharp
         /// <returns>Resolves to the content frame</returns>
         public async Task<Frame> ContentFrameAsync()
         {
-            var nodeInfo = await Client.SendAsync<DomDescribeNodeResponse>("DOM.describeNode", new Dictionary<string, object>
+            var nodeInfo = await Client.SendAsync<DomDescribeNodeResponse>("DOM.describeNode", new DomDescribeNodeRequest
             {
-                { MessageKeys.ObjectId, RemoteObject[MessageKeys.ObjectId] }
+                ObjectId = RemoteObject.ObjectId
             }).ConfigureAwait(false);
 
             return string.IsNullOrEmpty(nodeInfo.Node.FrameId) ? null : await _frameManager.GetFrameAsync(nodeInfo.Node.FrameId);
@@ -415,16 +427,20 @@ namespace PuppeteerSharp
         {
             GetContentQuadsResponse result = null;
 
+            var contentQuadsTask = Client.SendAsync<GetContentQuadsResponse>("DOM.getContentQuads", new DomGetContentQuadsRequest
+            {
+                ObjectId = RemoteObject.ObjectId
+            });
+            var layoutTask = Client.SendAsync<PageGetLayoutMetricsResponse>("Page.getLayoutMetrics");
+
             try
             {
-                result = await Client.SendAsync<GetContentQuadsResponse>("DOM.getContentQuads", new Dictionary<string, object>
-                {
-                    { MessageKeys.ObjectId, RemoteObject[MessageKeys.ObjectId] }
-                }).ConfigureAwait(false);
+                await Task.WhenAll(contentQuadsTask, layoutTask).ConfigureAwait(false);
+                result = contentQuadsTask.Result;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogError(ex, "Unable to get content quads");
             }
 
             if (result == null || result.Quads.Length == 0)
@@ -433,7 +449,11 @@ namespace PuppeteerSharp
             }
 
             // Filter out quads that have too small area to click into.
-            var quads = result.Quads.Select(FromProtocolQuad).Where(q => ComputeQuadArea(q) > 1);
+            var quads = result.Quads
+                .Select(FromProtocolQuad)
+                .Select(q => IntersectQuadWithViewport(q, layoutTask.Result))
+                .Where(q => ComputeQuadArea(q.ToArray()) > 1);
+
             if (!quads.Any())
             {
                 throw new PuppeteerException("Node is either not visible or not an HTMLElement");
@@ -454,6 +474,13 @@ namespace PuppeteerSharp
                 y: y / 4
             );
         }
+
+        private IEnumerable<BoxModelPoint> IntersectQuadWithViewport(IEnumerable<BoxModelPoint> quad, PageGetLayoutMetricsResponse viewport)
+            => quad.Select(point => new BoxModelPoint
+            {
+                X = Math.Min(Math.Max(point.X, 0), viewport.ContentSize.Width),
+                Y = Math.Min(Math.Max(point.Y, 0), viewport.ContentSize.Height),
+            });
 
         private async Task ScrollIntoViewIfNeededAsync()
         {
@@ -489,9 +516,9 @@ namespace PuppeteerSharp
         {
             try
             {
-                return await Client.SendAsync<BoxModelResponse>("DOM.getBoxModel", new
+                return await Client.SendAsync<BoxModelResponse>("DOM.getBoxModel", new DomGetBoxModelRequest
                 {
-                    objectId = RemoteObject[MessageKeys.ObjectId].AsString()
+                    ObjectId = RemoteObject.ObjectId
                 }).ConfigureAwait(false);
             }
             catch (PuppeteerException ex)

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackOnBuild>true</PackOnBuild>
-    <PackageVersion>1.11.1</PackageVersion>
+    <PackageVersion>1.17.2</PackageVersion>
     <Authors>Darío Kondratiuk</Authors>
     <Owners>Darío Kondratiuk</Owners>
     <PackageProjectUrl>https://github.com/kblok/puppeteer-sharp</PackageProjectUrl>
@@ -12,29 +12,19 @@
     <Description>Headless Chrome .NET API</Description>
     <PackageId>PuppeteerSharp</PackageId>
     <PackageReleaseNotes><![CDATA[
-# New Features
-
- * Support waitUntil option for `Page.SetContentAsync`.
- * Linux support.
-
-# Breaking Changes
-
- * IConnection.Closed, Connection.Closed and CDPSeccion.Closed events were renamed to `Disconnected`.
- * An IConnectionTransport now needs to implement `Task InitializeAsync(string url, IConnectionOptions connectionOptions, ILoggerFactory loggerFactory = null)`.
-
 # Changelog
- 
- * Roll Chromium to r609904.
- * Code cleanup.
- * Remove no-sandbox option in tests.
- * Dispatch errors into a page.
- * Fixed event handler leak.
- * Removed a couple of common allocations.
- * New target types.
- * LifeCycleWatcher fixes
- * ScrollIntoViewIfNeededAsync improvements
+
+ * Roll Chromium to r662092.
+ * Add SVG clicking test.
+ * Stringify response headers for intercepted requests.
+ * Evaluation test with UTF8.
+ * Page.SetContentAsync working with unicode strings.
+ * Fix SlowMo.
+ * Decimal support on GeoLocation options.
+ * Update the ASP.NET Full Framework example.
+ * Add missing TrySetExceptions.
  ]]></PackageReleaseNotes>
-    <ReleaseVersion>1.11.1</ReleaseVersion>
+    <ReleaseVersion>1.17.2</ReleaseVersion>
     <SynchReleaseVersion>false</SynchReleaseVersion>
   </PropertyGroup>
   <PropertyGroup>

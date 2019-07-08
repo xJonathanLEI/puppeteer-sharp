@@ -22,6 +22,7 @@ namespace PuppeteerSharp
 
         internal static readonly string[] DefaultArgs = {
             "--disable-background-networking",
+            "--enable-features=NetworkService,NetworkServiceInProcess",
             "--disable-background-timer-throttling",
             "--disable-backgrounding-occluded-windows",
             "--disable-breakpad",
@@ -29,17 +30,16 @@ namespace PuppeteerSharp
             "--disable-default-apps",
             "--disable-dev-shm-usage",
             "--disable-extensions",
-            "--disable-features=site-per-process",
+            "--disable-features=site-per-process,TranslateUI,BlinkGenPropertyTrees",
             "--disable-hang-monitor",
             "--disable-ipc-flooding-protection",
             "--disable-popup-blocking",
             "--disable-prompt-on-repost",
             "--disable-renderer-backgrounding",
             "--disable-sync",
-            "--disable-translate",
+            "--force-color-profile=srgb",
             "--metrics-recording-only",
             "--no-first-run",
-            "--safebrowsing-disable-auto-update",
             "--enable-automation",
             "--password-store=basic",
             "--use-mock-keychain"
@@ -60,8 +60,8 @@ namespace PuppeteerSharp
         private readonly LaunchOptions _options;
         private readonly TempDirectory _tempUserDataDir;
         private readonly ILogger _logger;
-        private readonly TaskCompletionSource<string> _startCompletionSource = new TaskCompletionSource<string>();
-        private readonly TaskCompletionSource<bool> _exitCompletionSource = new TaskCompletionSource<bool>();
+        private readonly TaskCompletionSource<string> _startCompletionSource = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _exitCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         private State _currentState = State.Initial;
 
         #endregion
@@ -188,8 +188,12 @@ namespace PuppeteerSharp
         {
             if (timeout.HasValue)
             {
-                var completedTask = await Task.WhenAny(_exitCompletionSource.Task, Task.Delay(timeout.Value)).ConfigureAwait(false);
-                return completedTask == _exitCompletionSource.Task;
+                var taskCompleted = true;
+                await _exitCompletionSource.Task.WithTimeout(() =>
+                {
+                    taskCompleted = false;
+                }, timeout.Value).ConfigureAwait(false);
+                return taskCompleted;
             }
 
             await _exitCompletionSource.Task.ConfigureAwait(false);
@@ -257,10 +261,6 @@ namespace PuppeteerSharp
                     "--hide-scrollbars",
                     "--mute-audio"
                 });
-                if (BrowserFetcher.GetCurrentPlatform() == Platform.Win32)
-                {
-                    chromeArguments.Add("--disable-gpu");
-                }
             }
 
             if (options.Args.All(arg => arg.StartsWith("-", StringComparison.Ordinal)))
@@ -518,13 +518,8 @@ namespace PuppeteerSharp
                         }
                     }
                     void OnProcessExitedWhileStarting(object sender, EventArgs e)
-                    {
-                        p._startCompletionSource.SetException(new ChromiumProcessException($"Failed to launch Chromium! {output}"));
-                    }
-                    void OnProcessExited(object sender, EventArgs e)
-                    {
-                        Exited.EnterFrom(p, p._currentState);
-                    }
+                        => p._startCompletionSource.TrySetException(new ChromiumProcessException($"Failed to launch Chromium! {output}"));
+                    void OnProcessExited(object sender, EventArgs e) => Exited.EnterFrom(p, p._currentState);
 
                     p.Process.ErrorDataReceived += OnProcessDataReceivedWhileStarting;
                     p.Process.Exited += OnProcessExitedWhileStarting;
@@ -606,14 +601,12 @@ namespace PuppeteerSharp
 
                 public override async Task ExitAsync(ChromiumProcess p, TimeSpan timeout)
                 {
-                    var timeoutTask = Task.Delay(timeout);
                     var waitForExitTask = WaitForExitAsync(p);
-                    var completedTask = await Task.WhenAny(waitForExitTask, timeoutTask).ConfigureAwait(false);
-                    if (completedTask == timeoutTask)
+                    await waitForExitTask.WithTimeout(async () =>
                     {
                         await Killing.EnterFromAsync(p, this).ConfigureAwait(false);
                         await waitForExitTask.ConfigureAwait(false);
-                    }
+                    }, timeout).ConfigureAwait(false);
                 }
 
                 public override Task KillAsync(ChromiumProcess p) => Killing.EnterFromAsync(p, this);

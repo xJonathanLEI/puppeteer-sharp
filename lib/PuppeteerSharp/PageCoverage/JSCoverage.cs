@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Json;
 using PuppeteerSharp.Messaging;
 
 namespace PuppeteerSharp.PageCoverage
@@ -47,9 +47,13 @@ namespace PuppeteerSharp.PageCoverage
 
             return Task.WhenAll(
                 _client.SendAsync("Profiler.enable"),
-                _client.SendAsync("Profiler.startPreciseCoverage", new { callCount = false, detailed = true }),
+                _client.SendAsync("Profiler.startPreciseCoverage", new ProfilerStartPreciseCoverageRequest
+                {
+                    CallCount = false,
+                    Detailed = true
+                }),
                 _client.SendAsync("Debugger.enable"),
-                _client.SendAsync("Debugger.setSkipAllPauses", new { skip = true })
+                _client.SendAsync("Debugger.setSkipAllPauses", new DebuggerSetSkipAllPausesRequest { Skip = true })
             );
         }
 
@@ -103,7 +107,7 @@ namespace PuppeteerSharp.PageCoverage
                 switch (e.MessageID)
                 {
                     case "Debugger.scriptParsed":
-                        await OnScriptParsed(e.MessageData.ToObject<DebuggerScriptParsedResponse>(true)).ConfigureAwait(false);
+                        await OnScriptParsedAsync(e.MessageData.ToObject<DebuggerScriptParsedResponse>(true)).ConfigureAwait(false);
                         break;
                     case "Runtime.executionContextsCleared":
                         OnExecutionContextsCleared();
@@ -118,7 +122,7 @@ namespace PuppeteerSharp.PageCoverage
             }
         }
 
-        private async Task OnScriptParsed(DebuggerScriptParsedResponse scriptParseResponse)
+        private async Task OnScriptParsedAsync(DebuggerScriptParsedResponse scriptParseResponse)
         {
             if (scriptParseResponse.Url == ExecutionContext.EvaluationScriptUrl ||
                 (string.IsNullOrEmpty(scriptParseResponse.Url) && !_reportAnonymousScripts))
@@ -128,9 +132,12 @@ namespace PuppeteerSharp.PageCoverage
 
             try
             {
-                var response = await _client.SendAsync("Debugger.getScriptSource", new { scriptId = scriptParseResponse.ScriptId }).ConfigureAwait(false);
+                var response = await _client.SendAsync<DebuggerGetScriptSourceResponse>("Debugger.getScriptSource", new DebuggerGetScriptSourceRequest
+                {
+                    ScriptId = scriptParseResponse.ScriptId
+                }).ConfigureAwait(false);
                 _scriptURLs.Add(scriptParseResponse.ScriptId, scriptParseResponse.Url);
-                _scriptSources.Add(scriptParseResponse.ScriptId, response[MessageKeys.ScriptSource].AsString());
+                _scriptSources.Add(scriptParseResponse.ScriptId, response.ScriptSource);
             }
             catch (Exception ex)
             {

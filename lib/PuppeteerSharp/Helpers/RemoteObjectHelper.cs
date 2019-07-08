@@ -3,71 +3,86 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Messaging;
+using PuppeteerSharp.Helpers.Json;
+using System.Numerics;
 
 namespace PuppeteerSharp.Helpers
 {
     internal class RemoteObjectHelper
     {
-        internal static object ValueFromRemoteObject<T>(JToken remoteObject)
+        internal static object ValueFromRemoteObject<T>(RemoteObject remoteObject)
         {
-            var unserializableValue = remoteObject[MessageKeys.UnserializableValue]?.AsString();
+            var unserializableValue = remoteObject.UnserializableValue;
 
             if (unserializableValue != null)
             {
-                switch (unserializableValue)
-                {
-                    case "-0":
-                        return -0;
-                    case "NaN":
-                        return double.NaN;
-                    case "Infinity":
-                        return double.PositiveInfinity;
-                    case "-Infinity":
-                        return double.NegativeInfinity;
-                    default:
-                        throw new Exception("Unsupported unserializable value: " + unserializableValue);
-                }
+                return ValueFromUnserializableValue(remoteObject, unserializableValue);
             }
 
-            var value = remoteObject[MessageKeys.Value];
+            var value = remoteObject.Value;
 
             if (value == null)
             {
                 return null;
             }
 
-            // https://chromedevtools.github.io/devtools-protocol/tot/Runtime#type-RemoteObject
-            var objectType = remoteObject[MessageKeys.Type].AsString();
+            return ValueFromType<T>(value, remoteObject.Type);
+        }
 
+        private static object ValueFromType<T>(JToken value, RemoteObjectType objectType)
+        {
             switch (objectType)
             {
-                case "object":
+                case RemoteObjectType.Object:
                     return value.ToObject<T>(true);
-                case "undefined":
+                case RemoteObjectType.Undefined:
                     return null;
-                case "number":
+                case RemoteObjectType.Number:
                     return value.Value<T>();
-                case "boolean":
+                case RemoteObjectType.Boolean:
                     return value.Value<bool>();
-                case "bigint":
+                case RemoteObjectType.Bigint:
                     return value.Value<double>();
                 default: // string, symbol, function
                     return value.ToObject<T>();
             }
         }
 
-        internal static async Task ReleaseObject(CDPSession client, JToken remoteObject, ILogger logger)
+        private static object ValueFromUnserializableValue(RemoteObject remoteObject, string unserializableValue)
         {
-            var objectId = remoteObject[MessageKeys.ObjectId]?.AsString();
+            if (remoteObject.Type == RemoteObjectType.Bigint &&
+                                decimal.TryParse(remoteObject.UnserializableValue.Replace("n", ""), out var decimalValue))
+            {
+                return new BigInteger(decimalValue);
+            }
+            switch (unserializableValue)
+            {
+                case "-0":
+                    return -0;
+                case "NaN":
+                    return double.NaN;
+                case "Infinity":
+                    return double.PositiveInfinity;
+                case "-Infinity":
+                    return double.NegativeInfinity;
+                default:
+                    throw new Exception("Unsupported unserializable value: " + unserializableValue);
+            }
+        }
 
-            if (objectId == null)
+        internal static async Task ReleaseObjectAsync(CDPSession client, RemoteObject remoteObject, ILogger logger)
+        {
+            if (remoteObject.ObjectId == null)
             {
                 return;
             }
 
             try
             {
-                await client.SendAsync("Runtime.releaseObject", new { objectId }).ConfigureAwait(false);
+                await client.SendAsync("Runtime.releaseObject", new RuntimeReleaseObjectRequest
+                {
+                    ObjectId = remoteObject.ObjectId
+                }).ConfigureAwait(false);
             }
             catch (Exception ex)
             {

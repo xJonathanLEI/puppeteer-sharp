@@ -7,7 +7,7 @@ namespace PuppeteerSharp
 {
     internal class WaitTask
     {
-        private readonly Frame _frame;
+        private readonly DOMWorld _world;
         private readonly string _predicateBody;
         private readonly WaitForFunctionPollingOption _polling;
         private readonly int? _pollingInterval;
@@ -111,7 +111,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
 }";
 
         internal WaitTask(
-            Frame frame,
+            DOMWorld world,
             string predicateBody,
             bool isExpression,
             string title,
@@ -129,15 +129,15 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
                 throw new ArgumentOutOfRangeException(nameof(pollingInterval), "Cannot poll with non-positive interval");
             }
 
-            _frame = frame;
-            _predicateBody = isExpression ? $"return {predicateBody}" : $"return ( {predicateBody} )(...args)";
+            _world = world;
+            _predicateBody = isExpression ? $"return ({predicateBody})" : $"return ({predicateBody})(...args)";
             _polling = polling;
             _pollingInterval = pollingInterval;
             _timeout = timeout;
             _args = args ?? new object[] { };
             _title = title;
 
-            frame.WaitTasks.Add(this);
+            _world.WaitTasks.Add(this);
 
             _cts = new CancellationTokenSource();
 
@@ -147,7 +147,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
                     => Terminate(new WaitTaskTimeoutException(timeout, title)));
             }
 
-            _taskCompletion = new TaskCompletionSource<JSHandle>();
+            _taskCompletion = new TaskCompletionSource<JSHandle>(TaskCreationOptions.RunContinuationsAsynchronously);
             _ = Rerun();
         }
 
@@ -159,7 +159,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
             JSHandle success = null;
             Exception exception = null;
 
-            var context = await _frame.GetExecutionContextAsync().ConfigureAwait(false);
+            var context = await _world.GetExecutionContextAsync().ConfigureAwait(false);
             try
             {
                 success = await context.EvaluateFunctionHandleAsync(WaitForPredicatePageFunction,
@@ -180,7 +180,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
                 return;
             }
             if (exception == null &&
-                await _frame.EvaluateFunctionAsync<bool>("s => !s", success)
+                await _world.EvaluateFunctionAsync<bool>("s => !s", success)
                     .ContinueWith(task => task.IsFaulted || task.Result)
                     .ConfigureAwait(false))
             {
@@ -194,6 +194,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
 
             if (exception?.Message.Contains("Execution context was destroyed") == true)
             {
+                _ = Rerun();
                 return;
             }
 
@@ -204,7 +205,7 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
 
             if (exception != null)
             {
-                _taskCompletion.SetException(exception);
+                _taskCompletion.TrySetException(exception);
             }
             else
             {
@@ -223,7 +224,8 @@ async function waitForPredicatePageFunction(predicateBody, polling, timeout, ...
         private void Cleanup()
         {
             _cts.Cancel();
-            _frame.WaitTasks.Remove(this);
+            _cts?.Dispose();
+            _world.WaitTasks.Remove(this);
         }
     }
 }

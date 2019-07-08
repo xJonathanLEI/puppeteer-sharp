@@ -1,12 +1,12 @@
 ﻿using System;
 using System.IO;
-using System.Net;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using PuppeteerSharp.Helpers.Linux;
+using Mono.Unix;
 using Xunit;
 using Xunit.Abstractions;
-using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Linux;
+using System.Collections.Generic;
 
 namespace PuppeteerSharp.Tests.PuppeteerTests
 {
@@ -44,11 +44,13 @@ namespace PuppeteerSharp.Tests.PuppeteerTests
                 Assert.True(revisionInfo.Local);
                 Assert.Equal("LINUX BINARY\n", File.ReadAllText(revisionInfo.ExecutablePath));
 
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) || RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
-                    Assert.Equal(
-                        BrowserFetcher.BrowserPermissionsInLinux,
-                        LinuxSysCall.GetFileMode(revisionInfo.ExecutablePath) & BrowserFetcher.BrowserPermissionsInLinux);
+#if NETCOREAPP //This will not be run on net4x anyway.
+                    Mono.Unix.FileAccessPermissions permissions = ConvertPermissions(LinuxSysCall.ExecutableFilePermissions);
+
+                    Assert.Equal(permissions, UnixFileSystemInfo.GetFileSystemEntry(revisionInfo.ExecutablePath).FileAccessPermissions & permissions);
+#endif
                 }
                 Assert.Equal(new[] { 123456 }, browserFetcher.LocalRevisions());
                 browserFetcher.Remove(123456);
@@ -67,34 +69,43 @@ namespace PuppeteerSharp.Tests.PuppeteerTests
                 EnsureDownloadsFolderIsDeleted();
             }
         }
+
+#if NETCOREAPP
+        private Mono.Unix.FileAccessPermissions ConvertPermissions(Helpers.Linux.FileAccessPermissions executableFilePermissions)
+        {
+            Mono.Unix.FileAccessPermissions output = 0;
+
+            var map = new Dictionary<Helpers.Linux.FileAccessPermissions, Mono.Unix.FileAccessPermissions>()
+            {
+                {Helpers.Linux.FileAccessPermissions.OtherExecute, Mono.Unix.FileAccessPermissions.OtherExecute},
+                {Helpers.Linux.FileAccessPermissions.OtherWrite, Mono.Unix.FileAccessPermissions.OtherWrite},
+                {Helpers.Linux.FileAccessPermissions.OtherRead, Mono.Unix.FileAccessPermissions.OtherRead},
+                {Helpers.Linux.FileAccessPermissions.GroupExecute, Mono.Unix.FileAccessPermissions.GroupExecute},
+                {Helpers.Linux.FileAccessPermissions.GroupWrite, Mono.Unix.FileAccessPermissions.GroupWrite},
+                {Helpers.Linux.FileAccessPermissions.GroupRead, Mono.Unix.FileAccessPermissions.GroupRead},
+                {Helpers.Linux.FileAccessPermissions.UserExecute, Mono.Unix.FileAccessPermissions.UserExecute},
+                {Helpers.Linux.FileAccessPermissions.UserWrite, Mono.Unix.FileAccessPermissions.UserWrite},
+                {Helpers.Linux.FileAccessPermissions.UserRead, Mono.Unix.FileAccessPermissions.UserRead}
+            };
+
+            foreach (var item in map.Keys)
+            {
+                if ((executableFilePermissions & item) == item)
+                {
+                    output |= map[item];
+                }
+            }
+
+            return output;
+        }
+#endif
+
         private void EnsureDownloadsFolderIsDeleted()
         {
             if (Directory.Exists(_downloadsFolder))
             {
                 Directory.Delete(_downloadsFolder, true);
             }
-        }
-
-        [Fact]
-        public async Task ShouldUseWebProxy()
-        {
-            var tcs = new TaskCompletionSource<bool>();
-
-            var browserFetcher = new BrowserFetcher()
-            {
-                Proxy = new WebProxy(TestConstants.HttpsPrefix)
-            };
-
-            HttpsServer.SetRoute(string.Empty, context =>
-            {
-                if (context.Request.Host.ToString().Contains(new Uri(browserFetcher.DownloadHost).DnsSafeHost))
-                {
-                    tcs.TrySetResult(true);
-                }
-                return Task.CompletedTask;
-            });
-            var _ = browserFetcher.DownloadAsync(-1);
-            await tcs.Task.WithTimeout();
         }
     }
 }

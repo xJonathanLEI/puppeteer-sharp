@@ -44,7 +44,7 @@ namespace PuppeteerSharp.Tests.PageTests
         {
             var called = false;
             await Page.ExposeFunctionAsync("woof", () => called = true);
-            await Page.EvaluateOnNewDocumentAsync("() => woof()");
+            await Page.EvaluateFunctionOnNewDocumentAsync("() => woof()");
             await Page.ReloadAsync();
             Assert.True(called);
         }
@@ -85,6 +85,16 @@ namespace PuppeteerSharp.Tests.PageTests
             var frame = Page.FirstChildFrame();
             var result = await frame.EvaluateExpressionAsync<int>("compute(3, 5)");
             Assert.Equal(15, result);
+        }
+
+        [Fact]
+        public async Task ShouldWorkWithComplexObjects()
+        {
+            await Page.GoToAsync(TestConstants.ServerUrl + "/frames/nested-frames.html");
+            await Page.ExposeFunctionAsync("complexObject", (dynamic a, dynamic b) => Task.FromResult(new { X = a.x + b.x }));
+
+            var result = await Page.EvaluateExpressionAsync<JToken>("complexObject({x: 5}, {x: 2})");
+            Assert.Equal(7, result.SelectToken("x").ToObject<int>());
         }
 
         [Fact]

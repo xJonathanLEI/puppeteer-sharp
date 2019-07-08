@@ -2,9 +2,9 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Messaging;
-using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Json;
+using Newtonsoft.Json.Linq;
 
 namespace PuppeteerSharp
 {
@@ -29,15 +29,15 @@ namespace PuppeteerSharp
         private readonly ILogger _logger;
         private readonly CDPSession _client;
         private ExecutionContext _executionContext;
-        private readonly Func<ConsoleType, JSHandle[], Task> _consoleAPICalled;
+        private readonly Func<ConsoleType, JSHandle[], StackTrace, Task> _consoleAPICalled;
         private readonly Action<EvaluateExceptionResponseDetails> _exceptionThrown;
         private readonly TaskCompletionSource<ExecutionContext> _executionContextCallback;
-        private Func<ExecutionContext, JToken, JSHandle> _jsHandleFactory;
+        private Func<ExecutionContext, RemoteObject, JSHandle> _jsHandleFactory;
 
         internal Worker(
             CDPSession client,
             string url,
-            Func<ConsoleType, JSHandle[], Task> consoleAPICalled,
+            Func<ConsoleType, JSHandle[], StackTrace, Task> consoleAPICalled,
             Action<EvaluateExceptionResponseDetails> exceptionThrown)
         {
             _logger = client.Connection.LoggerFactory.CreateLogger<Worker>();
@@ -47,7 +47,7 @@ namespace PuppeteerSharp
             _exceptionThrown = exceptionThrown;
             _client.MessageReceived += OnMessageReceived;
 
-            _executionContextCallback = new TaskCompletionSource<ExecutionContext>();
+            _executionContextCallback = new TaskCompletionSource<ExecutionContext>(TaskCreationOptions.RunContinuationsAsynchronously);
             _ = _client.SendAsync("Runtime.enable").ContinueWith(task =>
             {
                 if (task.IsFaulted)
@@ -84,6 +84,33 @@ namespace PuppeteerSharp
             => await (await ExecutionContextTask.ConfigureAwait(false)).EvaluateExpressionAsync<T>(script).ConfigureAwait(false);
 
         /// <summary>
+        /// Executes a function in browser context
+        /// </summary>
+        /// <param name="script">Script to be evaluated in browser context</param>
+        /// <param name="args">Arguments to pass to script</param>
+        /// <remarks>
+        /// If the script, returns a Promise, then the method would wait for the promise to resolve and return its value.
+        /// <see cref="JSHandle"/> instances can be passed as arguments
+        /// </remarks>
+        /// <returns>Task which resolves to script return value</returns>
+        public async Task<JToken> EvaluateFunctionAsync(string script, params object[] args)
+            => await (await ExecutionContextTask.ConfigureAwait(false)).EvaluateFunctionAsync(script, args).ConfigureAwait(false);
+
+        /// <summary>
+        /// Executes a function in the context
+        /// </summary>
+        /// <typeparam name="T">The type to deserialize the result to</typeparam>
+        /// <param name="script">Script to be evaluated in browser context</param>
+        /// <param name="args">Arguments to pass to script</param>
+        /// <remarks>
+        /// If the script, returns a Promise, then the method would wait for the promise to resolve and return its value.
+        /// <see cref="JSHandle"/> instances can be passed as arguments
+        /// </remarks>
+        /// <returns>Task which resolves to script return value</returns>
+        public async Task<T> EvaluateFunctionAsync<T>(string script, params object[] args)
+            => await (await ExecutionContextTask.ConfigureAwait(false)).EvaluateFunctionAsync<T>(script, args).ConfigureAwait(false);
+
+        /// <summary>
         /// Executes a script in browser context
         /// </summary>
         /// <param name="script">Script to be evaluated in browser context</param>
@@ -104,13 +131,13 @@ namespace PuppeteerSharp
                 switch (e.MessageID)
                 {
                     case "Runtime.executionContextCreated":
-                        OnExecutionContextCreated(e);
+                        OnExecutionContextCreated(e.MessageData.ToObject<RuntimeExecutionContextCreatedResponse>(true));
                         break;
                     case "Runtime.consoleAPICalled":
                         await OnConsoleAPICalled(e).ConfigureAwait(false);
                         break;
                     case "Runtime.exceptionThrown":
-                        OnExceptionThrown(e);
+                        OnExceptionThrown(e.MessageData.ToObject<RuntimeExceptionThrownResponse>(true));
                         break;
                 }
             }
@@ -122,26 +149,26 @@ namespace PuppeteerSharp
             }
         }
 
-        private void OnExceptionThrown(MessageEventArgs e)
-            => _exceptionThrown(e.MessageData.SelectToken(MessageKeys.ExceptionDetails).ToObject<EvaluateExceptionResponseDetails>(true));
+        private void OnExceptionThrown(RuntimeExceptionThrownResponse e) => _exceptionThrown(e.ExceptionDetails);
 
         private async Task OnConsoleAPICalled(MessageEventArgs e)
         {
             var consoleData = e.MessageData.ToObject<PageConsoleResponse>(true);
             await _consoleAPICalled(
                 consoleData.Type,
-                consoleData.Args.Select<dynamic, JSHandle>(i => _jsHandleFactory(_executionContext, i)).ToArray())
+                consoleData.Args.Select(i => _jsHandleFactory(_executionContext, i)).ToArray(),
+                consoleData.StackTrace)
                     .ConfigureAwait(false);
         }
 
-        private void OnExecutionContextCreated(MessageEventArgs e)
+        private void OnExecutionContextCreated(RuntimeExecutionContextCreatedResponse e)
         {
             if (_jsHandleFactory == null)
             {
                 _jsHandleFactory = (ctx, remoteObject) => new JSHandle(ctx, _client, remoteObject);
                 _executionContext = new ExecutionContext(
                     _client,
-                    e.MessageData.SelectToken(MessageKeys.Context).ToObject<ContextPayload>(true),
+                    e.Context,
                     null);
                 _executionContextCallback.TrySetResult(_executionContext);
             }

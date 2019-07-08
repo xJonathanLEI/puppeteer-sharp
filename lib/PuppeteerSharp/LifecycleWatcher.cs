@@ -22,7 +22,6 @@ namespace PuppeteerSharp
 
         private readonly FrameManager _frameManager;
         private readonly Frame _frame;
-        private readonly NavigationOptions _options;
         private readonly IEnumerable<string> _expectedLifecycle;
         private readonly int _timeout;
         private readonly string _initialLoaderId;
@@ -36,17 +35,10 @@ namespace PuppeteerSharp
         public LifecycleWatcher(
             FrameManager frameManager,
             Frame frame,
-            int timeout,
-            NavigationOptions options)
+            WaitUntilNavigation[] waitUntil,
+            int timeout)
         {
-            var waitUntil = _defaultWaitUntil;
-
-            if (options?.WaitUntil != null)
-            {
-                waitUntil = options.WaitUntil;
-            }
-
-            _expectedLifecycle = waitUntil.Select(w =>
+            _expectedLifecycle = (waitUntil ?? _defaultWaitUntil).Select(w =>
             {
                 var protocolEvent = _puppeteerToProtocolLifecycle.GetValueOrDefault(w);
                 Contract.Assert(protocolEvent != null, $"Unknown value for options.waitUntil: {w}");
@@ -55,21 +47,22 @@ namespace PuppeteerSharp
 
             _frameManager = frameManager;
             _frame = frame;
-            _options = options;
             _initialLoaderId = frame.LoaderId;
             _timeout = timeout;
             _hasSameDocumentNavigation = false;
 
-            _sameDocumentNavigationTaskWrapper = new TaskCompletionSource<bool>();
-            _newDocumentNavigationTaskWrapper = new TaskCompletionSource<bool>();
-            _lifecycleTaskWrapper = new TaskCompletionSource<bool>();
-            _terminationTaskWrapper = new TaskCompletionSource<bool>();
+            _sameDocumentNavigationTaskWrapper = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _newDocumentNavigationTaskWrapper = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _lifecycleTaskWrapper = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _terminationTaskWrapper = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            frameManager.LifecycleEvent += CheckLifecycleComplete;
+            frameManager.LifecycleEvent += FrameManager_LifecycleEvent;
             frameManager.FrameNavigatedWithinDocument += NavigatedWithinDocument;
             frameManager.FrameDetached += OnFrameDetached;
             frameManager.NetworkManager.Request += OnRequest;
             frameManager.Client.Disconnected += OnClientDisconnected;
+
+            CheckLifecycleComplete();
         }
 
         #region Properties
@@ -88,6 +81,8 @@ namespace PuppeteerSharp
         private void OnClientDisconnected(object sender, EventArgs e)
             => Terminate(new TargetClosedException("Navigation failed because browser has disconnected!", _frameManager.Client.CloseReason));
 
+        void FrameManager_LifecycleEvent(object sender, FrameEventArgs e) => CheckLifecycleComplete();
+
         private void OnFrameDetached(object sender, FrameEventArgs e)
         {
             var frame = e.Frame;
@@ -96,10 +91,10 @@ namespace PuppeteerSharp
                 Terminate(new PuppeteerException("Navigating frame was detached"));
                 return;
             }
-            CheckLifecycleComplete(sender, e);
+            CheckLifecycleComplete();
         }
 
-        private void CheckLifecycleComplete(object sender, FrameEventArgs e)
+        private void CheckLifecycleComplete()
         {
             // We expect navigation to commit.
             if (!CheckLifecycle(_frame, _expectedLifecycle))
@@ -140,7 +135,7 @@ namespace PuppeteerSharp
                 return;
             }
             _hasSameDocumentNavigation = true;
-            CheckLifecycleComplete(sender, e);
+            CheckLifecycleComplete();
         }
 
         private bool CheckLifecycle(Frame frame, IEnumerable<string> expectedLifecycle)
@@ -168,7 +163,7 @@ namespace PuppeteerSharp
 
         public void Dispose(bool disposing)
         {
-            _frameManager.LifecycleEvent -= CheckLifecycleComplete;
+            _frameManager.LifecycleEvent -= FrameManager_LifecycleEvent;
             _frameManager.FrameNavigatedWithinDocument -= NavigatedWithinDocument;
             _frameManager.FrameDetached -= OnFrameDetached;
             _frameManager.NetworkManager.Request -= OnRequest;

@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.WebSockets;
-using System.Threading;
-using System.Threading.Tasks;
 using PuppeteerSharp.Transport;
 
 namespace PuppeteerSharp
@@ -13,6 +11,7 @@ namespace PuppeteerSharp
     public class LaunchOptions : IBrowserOptions, IConnectionOptions
     {
         private string[] _ignoredDefaultArgs;
+        private bool _devtools;
 
         /// <summary>
         /// Whether to ignore HTTPS errors during navigation. Defaults to false.
@@ -62,7 +61,18 @@ namespace PuppeteerSharp
         /// <summary>
         /// Whether to auto-open DevTools panel for each tab. If this option is true, the headless option will be set false.
         /// </summary>
-        public bool Devtools { get; set; }
+        public bool Devtools
+        {
+            get => _devtools;
+            set
+            {
+                _devtools = value;
+                if (value)
+                {
+                    Headless = false;
+                }
+            }
+        }
 
         /// <summary>
         /// Keep alive value.
@@ -98,12 +108,42 @@ namespace PuppeteerSharp
         /// Optional factory for <see cref="WebSocket"/> implementations.
         /// If <see cref="Transport"/> is set this property will be ignored.
         /// </summary>
-        public Func<Uri, IConnectionOptions, CancellationToken, Task<WebSocket>> WebSocketFactory { get; set; }
+        /// <remarks>
+        /// If you need to run Puppeteer-Sharp on Windows 7, you can use <seealso cref="WebSocketFactory"/> to inject <see href="https://www.nuget.org/packages/System.Net.WebSockets.Client.Managed/">System.Net.WebSockets.Client.Managed</see>.
+        /// <example>
+        /// <![CDATA[
+        /// WebSocketFactory = async (uri, socketOptions, cancellationToken) =>
+        /// {
+        ///     var client = SystemClientWebSocket.CreateClientWebSocket();
+        ///     if (client is System.Net.WebSockets.Managed.ClientWebSocket managed)
+        ///     {
+        ///        managed.Options.KeepAliveInterval = TimeSpan.FromSeconds(0);
+        ///         await managed.ConnectAsync(uri, cancellationToken);
+        ///     }
+        ///     else
+        ///     {
+        ///         var coreSocket = client as ClientWebSocket;
+        ///         coreSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(0);
+        ///         await coreSocket.ConnectAsync(uri, cancellationToken);
+        ///     }
+        ///
+        ///     return client;
+        /// },
+        /// ]]>
+        /// </example>
+        /// </remarks>
+        public WebSocketFactory WebSocketFactory { get; set; }
 
         /// <summary>
         /// Optional connection transport.
         /// </summary>
+        [Obsolete("Use " + nameof(TransportFactory) + " instead")]
         public IConnectionTransport Transport { get; set; }
+
+        /// <summary>
+        /// Optional factory for <see cref="IConnectionTransport"/> implementations.
+        /// </summary>
+        public TransportFactory TransportFactory { get; set; }
 
         /// <summary>
         /// Gets or sets the default Viewport.

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Json;
 using PuppeteerSharp.Messaging;
 
 namespace PuppeteerSharp
@@ -164,7 +165,10 @@ namespace PuppeteerSharp
         /// Dafault wait time in milliseconds. Defaults to 30 seconds.
         /// </summary>
         public int DefaultWaitForTimeout { get; set; } = Puppeteer.DefaultTimeout;
-
+        /// <summary>
+        /// Indicates that the browser is connected.
+        /// </summary>
+        public bool IsConnected => !Connection.IsClosed;
         #endregion
 
         #region Public Methods
@@ -207,7 +211,7 @@ namespace PuppeteerSharp
         /// </example>
         public async Task<BrowserContext> CreateIncognitoBrowserContextAsync()
         {
-            var response = await Connection.SendAsync<CreateBrowserContextResponse>("Target.createBrowserContext", new { }).ConfigureAwait(false);
+            var response = await Connection.SendAsync<CreateBrowserContextResponse>("Target.createBrowserContext", null).ConfigureAwait(false);
             var context = new BrowserContext(Connection, this, response.BrowserContextId);
             _contexts[response.BrowserContextId] = context;
             return context;
@@ -245,10 +249,7 @@ namespace PuppeteerSharp
         /// the format of <see cref="GetVersionAsync"/> might change with future releases of Chromium
         /// </remarks>
         public async Task<string> GetVersionAsync()
-        {
-            var version = await Connection.SendAsync("Browser.getVersion").ConfigureAwait(false);
-            return version[MessageKeys.Product].AsString();
-        }
+            => (await Connection.SendAsync<BrowserGetVersionResponse>("Browser.getVersion").ConfigureAwait(false)).Product;
 
         /// <summary>
         /// Gets the browser's original user agent
@@ -258,10 +259,7 @@ namespace PuppeteerSharp
         /// Pages can override browser user agent with <see cref="Page.SetUserAgentAsync(string)"/>
         /// </remarks>
         public async Task<string> GetUserAgentAsync()
-        {
-            var version = await Connection.SendAsync("Browser.getVersion").ConfigureAwait(false);
-            return version[MessageKeys.UserAgent].AsString();
-        }
+            => (await Connection.SendAsync<BrowserGetVersionResponse>("Browser.getVersion").ConfigureAwait(false)).UserAgent;
 
         /// <summary>
         /// Disconnects Puppeteer from the browser, but leaves the Chromium process running. After calling <see cref="Disconnect"/>, the browser object is considered disposed and cannot be used anymore
@@ -297,7 +295,7 @@ namespace PuppeteerSharp
                 return existingTarget;
             }
 
-            var targetCompletionSource = new TaskCompletionSource<Target>();
+            var targetCompletionSource = new TaskCompletionSource<Target>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             void TargetHandler(object sender, TargetChangedArgs e)
             {
@@ -360,6 +358,13 @@ namespace PuppeteerSharp
                 }
             }
 
+            // Ensure that remaining targets are always marked closed, so that asynchronous page close 
+            // operations on any associated pages don't get blocked.
+            foreach (var target in TargetsMap.Values)
+            {
+                target.CloseTaskWrapper.TrySetResult(false);
+            }
+
             Closed?.Invoke(this, new EventArgs());
         }
 
@@ -376,12 +381,17 @@ namespace PuppeteerSharp
 
         internal async Task<Page> CreatePageInContextAsync(string contextId)
         {
-            var args = new Dictionary<string, object> { [MessageKeys.Url] = "about:blank" };
+            var createTargetRequest = new TargetCreateTargetRequest
+            {
+                Url = "about:blank"
+            };
+
             if (contextId != null)
             {
-                args[MessageKeys.BrowserContextId] = contextId;
+                createTargetRequest.BrowserContextId = contextId;
             }
-            var targetId = (await Connection.SendAsync("Target.createTarget", args).ConfigureAwait(false))[MessageKeys.TargetId].ToString();
+            var targetId = (await Connection.SendAsync<TargetCreateTargetResponse>("Target.createTarget", createTargetRequest)
+                .ConfigureAwait(false)).TargetId;
             var target = TargetsMap[targetId];
             await target.InitializedTask.ConfigureAwait(false);
             return await target.PageAsync().ConfigureAwait(false);
@@ -389,7 +399,10 @@ namespace PuppeteerSharp
 
         internal async Task DisposeContextAsync(string contextId)
         {
-            await Connection.SendAsync("Target.disposeBrowserContext", new { browserContextId = contextId }).ConfigureAwait(false);
+            await Connection.SendAsync("Target.disposeBrowserContext", new TargetDisposeBrowserContextRequest
+            {
+                BrowserContextId = contextId
+            }).ConfigureAwait(false);
             _contexts.Remove(contextId);
         }
 
@@ -478,7 +491,7 @@ namespace PuppeteerSharp
 
             var target = new Target(
                 e.TargetInfo,
-                info => Connection.CreateSessionAsync(info),
+                () => Connection.CreateSessionAsync(targetInfo),
                 context);
 
             if (TargetsMap.ContainsKey(e.TargetInfo.TargetId))
@@ -504,9 +517,9 @@ namespace PuppeteerSharp
             ChromiumProcess chromiumProcess)
         {
             var browser = new Browser(connection, contextIds, ignoreHTTPSErrors, defaultViewPort, chromiumProcess);
-            await connection.SendAsync("Target.setDiscoverTargets", new
+            await connection.SendAsync("Target.setDiscoverTargets", new TargetSetDiscoverTargetsRequest
             {
-                discover = true
+                Discover = true
             }).ConfigureAwait(false);
 
             return browser;

@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using PuppeteerSharp.Helpers;
+using PuppeteerSharp.Helpers.Json;
 using PuppeteerSharp.Messaging;
 
 namespace PuppeteerSharp.PageCoverage
@@ -105,7 +105,7 @@ namespace PuppeteerSharp.PageCoverage
                 switch (e.MessageID)
                 {
                     case "CSS.styleSheetAdded":
-                        await OnStyleSheetAdded(e.MessageData.ToObject<CSSStyleSheetAddedResponse>(true)).ConfigureAwait(false);
+                        await OnStyleSheetAddedAsync(e.MessageData.ToObject<CSSStyleSheetAddedResponse>(true)).ConfigureAwait(false);
                         break;
                     case "Runtime.executionContextsCleared":
                         OnExecutionContextsCleared();
@@ -120,7 +120,7 @@ namespace PuppeteerSharp.PageCoverage
             }
         }
 
-        private async Task OnStyleSheetAdded(CSSStyleSheetAddedResponse styleSheetAddedResponse)
+        private async Task OnStyleSheetAddedAsync(CSSStyleSheetAddedResponse styleSheetAddedResponse)
         {
             if (string.IsNullOrEmpty(styleSheetAddedResponse.Header.SourceURL))
             {
@@ -129,13 +129,13 @@ namespace PuppeteerSharp.PageCoverage
 
             try
             {
-                var response = await _client.SendAsync("CSS.getStyleSheetText", new
+                var response = await _client.SendAsync<CssGetStyleSheetTextResponse>("CSS.getStyleSheetText", new CssGetStyleSheetTextRequest
                 {
-                    styleSheetId = styleSheetAddedResponse.Header.StyleSheetId
+                    StyleSheetId = styleSheetAddedResponse.Header.StyleSheetId
                 }).ConfigureAwait(false);
 
                 _stylesheetURLs.Add(styleSheetAddedResponse.Header.StyleSheetId, styleSheetAddedResponse.Header.SourceURL);
-                _stylesheetSources.Add(styleSheetAddedResponse.Header.StyleSheetId, response[MessageKeys.Text].AsString());
+                _stylesheetSources.Add(styleSheetAddedResponse.Header.StyleSheetId, response.Text);
             }
             catch (Exception ex)
             {

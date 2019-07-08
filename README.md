@@ -4,7 +4,7 @@
 [![Build status](https://ci.appveyor.com/api/projects/status/pwfkjb0c4jfdo7lc/branch/master?svg=true&pendingText=master&failingText=master&passingText=master)][BuildUrl]
 [![Demo build status](https://ci.appveyor.com/api/projects/status/10g64a4aa0083wgf/branch/master?svg=true&pendingText=demo&failingText=demo&passingText=demo)][BuildDemoUrl]
 [![CodeFactor](https://www.codefactor.io/repository/github/kblok/puppeteer-sharp/badge)][CodeFactorUrl]
-[![Backers](https://opencollective.com/puppeteer-sharp/tiers/backer/badge.svg?label=Backer&color=brightgreen)][Backers]
+[![Backers](https://opencollective.com/puppeteer-sharp//backers/badge.svg)][Backers]
 
 [NugetUrl]: https://www.nuget.org/packages/PuppeteerSharp/
 [BuildUrl]: https://ci.appveyor.com/project/kblok/puppeteer-sharp/branch/master
@@ -21,14 +21,11 @@ Puppeteer Sharp is a .NET port of the official [Node.JS Puppeteer API](https://g
 * [StackOverflow](https://stackoverflow.com/search?q=puppeteer-sharp)
 * [Issues](https://github.com/kblok/puppeteer-sharp/issues?utf8=%E2%9C%93&q=is%3Aissue)
 
-# Backers
-
-Support us with a monthly donation and help us continue our activities. [Become a backer](https://opencollective.com/puppeteer-sharp).
-
 # Prerequisites
 
- * As Puppeteer-Sharp is a NetStandard 2.0 library, The minimum platform versions are .NET Framework 4.6.1 and .NET Core 2.0. [Read more](https://docs.microsoft.com/en-us/dotnet/standard/net-standard).
- * The minimum Windows versions supporting the WebSocket library are Windows 8 and Windows Server 2012. [Read more](https://docs.microsoft.com/en-us/dotnet/api/system.net.websockets?redirectedfrom=MSDN&view=netframework-4.7.2).
+ * As Puppeteer-Sharp is a NetStandard 2.0 library, the minimum platform versions are .NET Framework 4.6.1 and .NET Core 2.0. [Read more](https://docs.microsoft.com/en-us/dotnet/standard/net-standard).
+ * The minimum **Windows** versions supporting the WebSocket library are Windows 8 and Windows Server 2012. [Read more](https://docs.microsoft.com/en-us/dotnet/api/system.net.websockets?redirectedfrom=MSDN&view=netframework-4.7.2). If you need to run Puppeteer-Sharp on Windows 7 you can use [System.Net.WebSockets.Client.Managed](https://www.nuget.org/packages/System.Net.WebSockets.Client.Managed/) through the [LaunchOptions.WebSocketFactory](https://www.puppeteersharp.com/api/PuppeteerSharp.LaunchOptions.html#PuppeteerSharp_LaunchOptions_WebSocketFactory) property.
+ * If you have issues running Chrome on Linux, the Puppeteer repo has a [great troubleshooting guide](https://github.com/GoogleChrome/puppeteer/blob/master/docs/troubleshooting.md).
 
  # How to Contribute and Provide Feedback
 
@@ -122,7 +119,7 @@ using (var page = await browser.NewPageAsync())
 using (var page = await browser.NewPageAsync())
 {
     await page.GoToAsync("http://www.spapage.com");
-    var watchDog = page.WaitForFunctionAsync("window.innerWidth < 100");
+    var watchDog = page.WaitForFunctionAsync("()=> window.innerWidth < 100");
     await page.SetViewportAsync(new ViewPortOptions { Width = 50, Height = 50 });
     await watchDog;
 }
@@ -149,6 +146,12 @@ using (var browser = await PuppeteerSharp.Puppeteer.ConnectAsync(options))
 ```
 
 # Monthly reports
+ * [June 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-jun-2019)
+ * [May 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-may-2019)
+ * [April 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-apr-2019)
+ * [March 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-mar-2019)
+ * [February 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-feb-2019)
+ * [January 2019](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-jan-2019)
  * [December 2018](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-dec-2018)
  * [November 2018](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-nov-2018)
  * [October 2018](http://www.hardkoded.com/blog/puppeteer-sharp-monthly-oct-2018)
@@ -159,4 +162,18 @@ using (var browser = await PuppeteerSharp.Puppeteer.ConnectAsync(options))
  * [April 2018](http://www.hardkoded.com/blogs/puppeteer-sharp-monthly-april-2018)
  * [March 2018](http://www.hardkoded.com/blogs/puppeteer-sharp-monthly-march-2018)
  * [February 2018](http://www.hardkoded.com/blogs/puppeteer-sharp-monthly-february-2018)
+
+# Backers
+
+Support us with a monthly donation and help us continue our activities. [Become a backer](https://opencollective.com/puppeteer-sharp).
+
+<a href="https://opencollective.com/puppeteer-sharp/backer/0/website" target="_blank"><img src="https://opencollective.com/puppeteer-sharp/backer/0/avatar.svg"></a>
+<a href="https://opencollective.com/puppeteer-sharp/backer/1/website" target="_blank"><img src="https://opencollective.com/puppeteer-sharp/backer/1/avatar.svg"></a>
+<a href="https://opencollective.com/puppeteer-sharp/backer/2/website" target="_blank"><img src="https://opencollective.com/puppeteer-sharp/backer/2/avatar.svg"></a>
+<a href="https://opencollective.com/puppeteer-sharp/backer/3/website" target="_blank"><img src="https://opencollective.com/puppeteer-sharp/backer/3/avatar.svg"></a>
+
+# Thanks
+
+Thanks to [JetBrains](https://www.jetbrains.com/?from=PuppeteerSharp) for a community Resharper license to use on this project.
+
 
